@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+cvenv/
+venv/
+
+# YOLO weights
+*.pt
+
+# output videos
+output/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
