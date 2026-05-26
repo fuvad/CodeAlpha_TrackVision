@@ -1,24 +1,50 @@
 import cv2
 from ultralytics import YOLO
-from tracker import Tracker
+from deep_sort_realtime.deepsort_tracker import DeepSort
 
 
+# Load YOLO model
 model = YOLO("yolov8n.pt")
 
-tracker = Tracker()
+
+# Initialize Deep SORT tracker
+tracker = DeepSort(
+    max_age=30,
+    n_init=3,
+    max_cosine_distance=0.4,
+)
 
 
-# webcam
-cap = cv2.VideoCapture(0)
+# Webcam
+cap = cv2.VideoCapture(
+    0,
+    cv2.CAP_DSHOW
+)
 
-# if webcam not found
+# Video file example:
+# cap = cv2.VideoCapture(
+#     "videos/sample.mp4"
+# )
+
+
+# Check webcam
 if not cap.isOpened():
     print("Cannot open webcam")
     exit()
 
 
-with open("coco.txt", "r") as file:
-    class_list = file.read().split("\n")
+# Load COCO classes safely
+with open(
+    "coco.txt",
+    "r",
+    encoding="utf-8"
+) as file:
+
+    class_list = [
+        line.strip()
+        for line in file
+        if line.strip()
+    ]
 
 
 while True:
@@ -29,17 +55,22 @@ while True:
         print("Failed to grab frame")
         break
 
+
+    # Run YOLO
     results = model(frame)
 
     detections = []
 
+
     for result in results:
 
-        for box in result.boxes:
+        boxes = result.boxes
 
-            x1, y1, x2, y2 = map(
-                int,
-                box.xyxy[0]
+
+        for box in boxes:
+
+            x1, y1, x2, y2 = (
+                box.xyxy[0].tolist()
             )
 
             confidence = float(
@@ -50,47 +81,72 @@ while True:
                 box.cls[0]
             )
 
+
+            # Ignore weak detections
             if confidence < 0.5:
                 continue
 
-            detections.append(
-                [
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    class_id,
+
+            # Safe label lookup
+            if class_id < len(
+                class_list
+            ):
+                label = class_list[
+                    class_id
                 ]
+            else:
+                label = "unknown"
+
+
+            # Deep SORT format:
+            # ([left, top, width, height],
+            # confidence,
+            # class_name)
+
+            detections.append(
+                (
+                    [
+                        int(x1),
+                        int(y1),
+                        int(x2 - x1),
+                        int(y2 - y1),
+                    ],
+                    confidence,
+                    label,
+                )
             )
 
-    tracked_input = [
-        det[:4]
-        for det in detections
-    ]
 
-    tracked_boxes = tracker.update(
-        tracked_input
+    # Update tracker
+    tracks = tracker.update_tracks(
+        detections,
+        frame=frame,
     )
 
-    for tracked_box in tracked_boxes:
 
-        x1, y1, x2, y2, obj_id = (
-            tracked_box
+    # Draw tracked objects
+    for track in tracks:
+
+        if not track.is_confirmed():
+            continue
+
+
+        track_id = (
+            track.track_id
         )
 
-        label = "object"
+        label = (
+            track.get_det_class()
+        )
 
-        for det in detections:
 
-            dx1, dy1, dx2, dy2, cid = det
+        x1, y1, x2, y2 = map(
+            int,
+            track.to_ltrb()
+        )
 
-            if (
-                abs(x1 - dx1) < 10
-                and abs(y1 - dy1) < 10
-            ):
-                label = class_list[cid]
-                break
 
+        # Bounding box
         cv2.rectangle(
             frame,
             (x1, y1),
@@ -99,25 +155,31 @@ while True:
             2,
         )
 
+
+        # Label + ID
         cv2.putText(
             frame,
-            f"{label} ID:{obj_id}",
+            f"{label} ID:{track_id}",
             (x1, y1 - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
+            0.7,
             (0, 255, 0),
             2,
         )
 
+
     cv2.imshow(
-        "Object Detection + Tracking",
+        "TrackVision - YOLOv8 + Deep SORT",
         frame,
     )
 
-    # keep window alive
-    key = cv2.waitKey(1)
 
-    if key == ord("q"):
+    # Quit
+    if (
+        cv2.waitKey(1)
+        & 0xFF
+        == ord("q")
+    ):
         break
 
 
